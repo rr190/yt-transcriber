@@ -31,10 +31,18 @@ def download_audio(url: str) -> Path:
     """
     Downloads the audio for a YouTube video into its own temporary
     directory (so concurrent requests never collide) and returns the
-    path to the resulting mp3 file.
+    path to the resulting audio file, in whatever container YouTube
+    served it in (webm/opus, m4a, ...).
 
-    Encoded at a modest bitrate to keep file size small — this matters
-    because the transcription API has a per-request file size limit.
+    We deliberately do NOT ask yt-dlp to re-encode this to mp3 (no -x /
+    --audio-format): transcription.py's transcribe_segment() already
+    re-encodes each ~10min chunk to mp3 64k on its own right before
+    sending it to the transcription API. Re-encoding the *whole* file
+    here first was pure waste — it's CPU-bound work done twice over the
+    entire audio, which on a CPU-constrained host (e.g. Render's free
+    tier) was the actual source of the multi-minute "stuck at
+    extracting audio" stalls. ffmpeg/ffprobe can read any container
+    directly, so skipping this doesn't cost us anything downstream.
     """
 
     work_dir = Path(tempfile.mkdtemp(prefix="ytt_"))
@@ -46,11 +54,6 @@ def download_audio(url: str) -> Path:
         "yt_dlp",
         "-f",
         "bestaudio",
-        "-x",
-        "--audio-format",
-        "mp3",
-        "--audio-quality",
-        "64K",
         "-o",
         str(output_template),
     ]
@@ -100,15 +103,15 @@ def download_audio(url: str) -> Path:
             print(f"[yt-dlp] {line}", flush=True)
             output_lines.append(line)
 
-            # The raw video download finishing doesn't mean we're done —
-            # yt-dlp still has to shell out to ffmpeg to strip/transcode
-            # the audio track, which can itself take a while on longer
-            # videos. Flag that transition so a stall there doesn't look
-            # like a stall in the download itself.
-            if "[ExtractAudio] Destination:" in line:
+            # We no longer ask yt-dlp to transcode (see docstring), so
+            # this is normally just a straight download. But flag it if
+            # yt-dlp ever still invokes a postprocessor (e.g. a remux),
+            # so a stall there doesn't look like a stall in the raw
+            # download itself.
+            if "Destination:" in line and "[download]" not in line:
                 print(
-                    f"[youtube] video downloaded, extracting audio via ffmpeg "
-                    f"({time.monotonic() - start:.1f}s elapsed so far)",
+                    f"[youtube] post-processing step started "
+                    f"({time.monotonic() - start:.1f}s elapsed so far): {line}",
                     flush=True,
                 )
 
@@ -125,9 +128,16 @@ def download_audio(url: str) -> Path:
             f"Failed to download audio from the provided URL. {tail[-500:]}"
         )
 
-    audio_path = work_dir / "audio.mp3"
+    # Extension varies with whatever format YouTube served as "bestaudio"
+    # (webm, m4a, opus, ...) since we're no longer forcing a re-encode.
+    produced = [
+        p for p in work_dir.glob("audio.*") if p.name != "cookies.txt"
+    ]
 
-    if not audio_path.exists():
+    if not produced:
         raise ValueError("Download succeeded but no audio file was produced.")
+
+    audio_path = produced[0]
+    print(f"[youtube] audio file: {audio_path.name} ({audio_path.stat().st_size / 1_048_576:.1f} MiB)", flush=True)
 
     return audio_path

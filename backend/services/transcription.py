@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -42,23 +43,34 @@ def transcribe_segment(
         raise FileNotFoundError(f"The file '{file_path}' does not exist.")
 
     chunk_path = f"{file_path}.{start_time}.chunk.mp3"
+    label = f"chunk[{start_time}-{start_time + segment_duration}]"
 
     try:
+        t0 = time.monotonic()
         _extract_chunk(file_path, start_time, segment_duration, chunk_path)
+        extract_elapsed = time.monotonic() - t0
+        chunk_size = os.path.getsize(chunk_path) / 1_048_576
+        print(
+            f"[transcribe {label}] ffmpeg extracted {chunk_size:.1f}MiB in {extract_elapsed:.1f}s, calling Groq...",
+            flush=True,
+        )
 
         with open(chunk_path, "rb") as audio_file:
             kwargs = {}
             if language and language != "auto":
                 kwargs["language"] = language
 
+            t1 = time.monotonic()
             transcription = client.audio.transcriptions.create(
                 file=(os.path.basename(chunk_path), audio_file.read()),
                 model=MODEL,
                 response_format="json",
                 **kwargs,
             )
+            groq_elapsed = time.monotonic() - t1
 
         text = transcription.text.strip()
+        print(f"[transcribe {label}] Groq responded in {groq_elapsed:.1f}s", flush=True)
 
         return {
             "start": start_time,
