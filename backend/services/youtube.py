@@ -87,6 +87,7 @@ def download_audio(url: str) -> Path:
     try:
         process = subprocess.Popen(
             command,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -98,6 +99,18 @@ def download_audio(url: str) -> Path:
             line = line.rstrip("\n")
             print(f"[yt-dlp] {line}", flush=True)
             output_lines.append(line)
+
+            # The raw video download finishing doesn't mean we're done —
+            # yt-dlp still has to shell out to ffmpeg to strip/transcode
+            # the audio track, which can itself take a while on longer
+            # videos. Flag that transition so a stall there doesn't look
+            # like a stall in the download itself.
+            if "[ExtractAudio] Destination:" in line:
+                print(
+                    f"[youtube] video downloaded, extracting audio via ffmpeg "
+                    f"({time.monotonic() - start:.1f}s elapsed so far)",
+                    flush=True,
+                )
 
         returncode = process.wait()
     except Exception as e:
