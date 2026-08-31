@@ -109,6 +109,19 @@ async def transcribe_audio_endpoint(
                     cancel_event.set()
                     break
 
+                if result["event"] == "started":
+                    log(f"chunk {result['start']}-{result['end']} started")
+
+                    yield json.dumps(
+                        {
+                            "status": "chunk_started",
+                            "start": result["start"],
+                            "end": result["end"],
+                        }
+                    ) + "\n"
+
+                    continue
+
                 yield json.dumps(
                     {
                         "status": "chunk",

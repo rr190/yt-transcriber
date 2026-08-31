@@ -6,6 +6,7 @@ import Transcript from "./components/Transcript";
 
 import { streamTranscription } from "./api/transcription";
 import type { TranscriptionEvent } from "./types/transcription";
+import { formatTime } from "./utils/format";
 
 import "./App.css";
 
@@ -58,8 +59,14 @@ function App() {
         setStatus("Starting transcription...");
         break;
 
+      case "chunk_started":
+        setStatus(
+          `Transcribing ${formatTime(event.start)}–${formatTime(event.end)}...`
+        );
+        break;
+
       case "chunk":
-        setStatus(`Transcribing ${event.start}s – ${event.end}s`);
+        setStatus(`Transcribed ${formatTime(event.start)}–${formatTime(event.end)}`);
         setCurrentTime(event.end);
         appendChunk(event.text);
         break;
