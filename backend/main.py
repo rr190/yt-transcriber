@@ -27,9 +27,17 @@ default_origins = [
 frontend_url = os.environ.get("FRONTEND_URL")
 allow_origins = default_origins + ([frontend_url] if frontend_url else [])
 
+# Vercel gives every preview deployment its own random-hash subdomain
+# (e.g. yt-transcriber-eqprw5ez1-jr-61b3.vercel.app), so a single exact
+# FRONTEND_URL only ever covers production. This regex additionally
+# allows any preview/production URL under the same Vercel project name.
+vercel_project = os.environ.get("VERCEL_PROJECT_NAME", "yt-transcriber")
+allow_origin_regex = rf"^https://{vercel_project}(-[a-zA-Z0-9]+)*\.vercel\.app$"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
+    allow_origin_regex=allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
