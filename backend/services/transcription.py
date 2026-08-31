@@ -12,13 +12,6 @@ client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 # under that limit. At 64kbps mp3, 600s (10 min) is ~4.8MB.
 CHUNK_SECONDS = 600
 
-# A full 10-minute chunk can take a couple minutes to extract+transcribe
-# on a CPU-constrained host, which means the UI shows nothing at all
-# until that first chunk finishes. Making just the first chunk short
-# gets real transcript text on screen much sooner; every chunk after it
-# is full-length as normal.
-FIRST_CHUNK_SECONDS = 90
-
 MODEL = os.environ.get("GROQ_WHISPER_MODEL", "whisper-large-v3")
 
 
@@ -95,32 +88,6 @@ def transcribe_segment(
             os.remove(chunk_path)
 
 
-def _build_segments(duration) -> list[tuple[int, int]]:
-    """
-    Splits the full duration into (start, length) chunks. The first
-    chunk is short (FIRST_CHUNK_SECONDS) so the UI gets real text to
-    show quickly; every chunk after that is a normal full-length one.
-    """
-
-    duration = int(duration)
-
-    if duration <= 0:
-        return [(0, 1)]
-
-    segments: list[tuple[int, int]] = []
-
-    first_len = min(FIRST_CHUNK_SECONDS, duration)
-    segments.append((0, first_len))
-
-    start = first_len
-    while start < duration:
-        length = min(CHUNK_SECONDS, duration - start)
-        segments.append((start, length))
-        start += length
-
-    return segments
-
-
 def transcribe_concurrently(
     file_path,
     duration,
@@ -128,40 +95,25 @@ def transcribe_concurrently(
     language: str | None = "zh",
     max_workers: int = 3,
 ):
-    """
-    Yields two kinds of events, both dicts:
-      - {"event": "started", "start": ..., "end": ...} — a chunk just
-        began extraction/transcription, so the caller can show live
-        progress instead of going silent for however long that chunk
-        takes.
-      - {"event": "done", "start": ..., "end": ..., "text": ...} — a
-        chunk finished, yielded strictly in chronological order even
-        though workers may complete out of order.
-    """
+    starts = list(range(0, int(duration), CHUNK_SECONDS))
 
-    segments = _build_segments(duration)
+    if not starts:
+        starts = [0]
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures: dict = {}
+        futures = {}
 
-        def submit(index: int) -> tuple[int, int]:
-            start, length = segments[index]
-
-            future = executor.submit(
-                transcribe_segment, str(file_path), start, length, language
-            )
-
-            futures[future] = (start, length)
-
-            return start, length
-
-        for i in range(min(max_workers, len(segments))):
+        for start in starts[:max_workers]:
             if cancel_event.is_set():
                 return
 
-            start, length = submit(i)
+            remaining = min(CHUNK_SECONDS, max(duration - start, 1))
 
-            yield {"event": "started", "start": start, "end": start + length}
+            future = executor.submit(
+                transcribe_segment, str(file_path), start, remaining, language
+            )
+
+            futures[future] = start
 
         next_index = max_workers
         pending_results = {}
@@ -173,7 +125,7 @@ def transcribe_concurrently(
                 return
 
             done = next(as_completed(futures))
-            start, length = futures.pop(done)
+            start = futures.pop(done)
 
             try:
                 result = done.result()
@@ -184,19 +136,27 @@ def transcribe_concurrently(
                 # blocked forever by one failed chunk.
                 pending_results[start] = {
                     "start": start,
-                    "end": start + length,
+                    "end": start + CHUNK_SECONDS,
                     "text": "",
                 }
 
             # Yield results in chronological order, even though workers
             # may finish out of order.
-            while yield_pointer < len(segments) and segments[yield_pointer][0] in pending_results:
-                seg_start = segments[yield_pointer][0]
-                result = pending_results.pop(seg_start)
-                yield {"event": "done", **result}
+            while yield_pointer < len(starts) and starts[yield_pointer] in pending_results:
+                yield pending_results.pop(starts[yield_pointer])
                 yield_pointer += 1
 
-            if not cancel_event.is_set() and next_index < len(segments):
-                start, length = submit(next_index)
-                yield {"event": "started", "start": start, "end": start + length}
+            if not cancel_event.is_set() and next_index < len(starts):
+                next_start = starts[next_index]
+                remaining = min(CHUNK_SECONDS, max(duration - next_start, 1))
+
+                future = executor.submit(
+                    transcribe_segment,
+                    str(file_path),
+                    next_start,
+                    remaining,
+                    language,
+                )
+
+                futures[future] = next_start
                 next_index += 1

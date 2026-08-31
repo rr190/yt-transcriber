@@ -7,11 +7,6 @@ export type TranscriptionEvent =
       duration: number;
     }
   | {
-      status: "chunk_started";
-      start: number;
-      end: number;
-    }
-  | {
       status: "chunk";
       start: number;
       end: number;

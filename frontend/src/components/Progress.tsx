@@ -1,11 +1,20 @@
-import { formatTime } from "../utils/format";
-
 interface ProgressProps {
   status: string;
   currentTime: number;
   totalDuration: number;
   loading: boolean;
   elapsed: number;
+}
+
+function formatTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return "0:00";
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+
+  return `${minutes}:${secs.toString().padStart(2, "0")}`;
 }
 
 export default function Progress({
