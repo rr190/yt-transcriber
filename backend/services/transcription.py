@@ -46,6 +46,7 @@ def transcribe_segment(
     label = f"chunk[{start_time}-{start_time + segment_duration}]"
 
     try:
+        print(f"[transcribe {label}] extracting via ffmpeg...", flush=True)
         t0 = time.monotonic()
         _extract_chunk(file_path, start_time, segment_duration, chunk_path)
         extract_elapsed = time.monotonic() - t0
