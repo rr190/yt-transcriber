@@ -1,8 +1,10 @@
+import asyncio
 import json
 import os
 import shutil
 from pathlib import Path
 from threading import Event
+from typing import Any, cast
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -47,21 +49,42 @@ async def transcribe_audio_endpoint(
 ):
     cancel_event = Event()
 
+    # A sentinel to detect generator exhaustion through asyncio.to_thread,
+    # which can't distinguish "no more items" from a real yielded value.
+    _DONE = object()
+
     async def generate():
         audio_path = None
 
         try:
-            audio_path = download_audio(url)
+            # download_audio/get_audio_duration/transcribe_concurrently are
+            # all blocking (subprocess calls to yt-dlp/ffmpeg, network
+            # calls to Groq). Running them directly on the event loop would
+            # freeze the whole server for the duration of every request —
+            # with a single worker process, that means no other request
+            # (including Render's own health check) gets served, which can
+            # get the instance killed/restarted mid-transcription. Pushing
+            # each blocking call to a worker thread keeps the loop free.
+            audio_path = await asyncio.to_thread(download_audio, url)
 
             yield json.dumps({"status": "downloaded"}) + "\n"
 
-            duration = get_audio_duration(audio_path)
+            duration = await asyncio.to_thread(get_audio_duration, audio_path)
 
             yield json.dumps({"status": "duration", "duration": duration}) + "\n"
 
-            for result in transcribe_concurrently(
+            segments = transcribe_concurrently(
                 audio_path, duration, cancel_event, language=language
-            ):
+            )
+
+            while True:
+                raw_result = await asyncio.to_thread(next, segments, _DONE)
+
+                if raw_result is _DONE:
+                    break
+
+                result = cast(dict[str, Any], raw_result)
+
                 # Browser disconnected
                 if await request.is_disconnected():
                     cancel_event.set()
