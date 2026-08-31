@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from threading import Event
 from typing import Any, cast
@@ -63,8 +64,14 @@ async def transcribe_audio_endpoint(
 
     async def generate():
         audio_path = None
+        request_start = time.monotonic()
+
+        def log(message: str) -> None:
+            print(f"[transcribe +{time.monotonic() - request_start:.1f}s] {message}", flush=True)
 
         try:
+            log(f"request received for {url!r} (language={language!r})")
+
             # download_audio/get_audio_duration/transcribe_concurrently are
             # all blocking (subprocess calls to yt-dlp/ffmpeg, network
             # calls to Groq). Running them directly on the event loop would
@@ -73,14 +80,18 @@ async def transcribe_audio_endpoint(
             # (including Render's own health check) gets served, which can
             # get the instance killed/restarted mid-transcription. Pushing
             # each blocking call to a worker thread keeps the loop free.
+            log("downloading audio via yt-dlp (this is usually the slow part — see [yt-dlp] logs below)")
             audio_path = await asyncio.to_thread(download_audio, url)
+            log(f"audio downloaded to {audio_path}")
 
             yield json.dumps({"status": "downloaded"}) + "\n"
 
             duration = await asyncio.to_thread(get_audio_duration, audio_path)
+            log(f"audio duration: {duration:.1f}s")
 
             yield json.dumps({"status": "duration", "duration": duration}) + "\n"
 
+            log("starting transcription")
             segments = transcribe_concurrently(
                 audio_path, duration, cancel_event, language=language
             )
@@ -108,9 +119,11 @@ async def transcribe_audio_endpoint(
                     ensure_ascii=False,
                 ) + "\n"
 
+            log("transcription complete")
             yield json.dumps({"status": "complete"}) + "\n"
 
         except Exception as e:
+            log(f"error: {e}")
             yield json.dumps({"status": "error", "message": str(e)}) + "\n"
 
         finally:

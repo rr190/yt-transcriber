@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import json
 from pathlib import Path
 
@@ -71,20 +72,45 @@ def download_audio(url: str) -> Path:
 
     command.append(url)
 
+    # yt-dlp against YouTube (extractor negotiation, format selection,
+    # bot-check challenges, then the actual download/transcode) is the
+    # single biggest chunk of the ">40s with zero feedback" complaint.
+    # subprocess.run(capture_output=True) buffers everything until the
+    # process exits, so nothing is visible while it's stuck. Stream the
+    # output line-by-line to our own stdout instead (prefixed + timestamped)
+    # so `render logs` / the local console shows what yt-dlp is doing in
+    # real time, while still keeping the tail of it for error messages.
+    print(f"[youtube] starting yt-dlp for {url}", flush=True)
+    start = time.monotonic()
+    output_lines: list[str] = []
+
     try:
-        subprocess.run(
+        process = subprocess.Popen(
             command,
-            check=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
         )
-    except subprocess.CalledProcessError as e:
-        raise ValueError(
-            "Failed to download audio from the provided URL. "
-            f"{e.stderr[-500:] if e.stderr else ''}"
-        )
+
+        assert process.stdout is not None
+        for line in process.stdout:
+            line = line.rstrip("\n")
+            print(f"[yt-dlp] {line}", flush=True)
+            output_lines.append(line)
+
+        returncode = process.wait()
     except Exception as e:
         raise RuntimeError(f"An unexpected error occurred: {e}")
+
+    elapsed = time.monotonic() - start
+    print(f"[youtube] yt-dlp exited {returncode} after {elapsed:.1f}s", flush=True)
+
+    if returncode != 0:
+        tail = "\n".join(output_lines[-20:])
+        raise ValueError(
+            f"Failed to download audio from the provided URL. {tail[-500:]}"
+        )
 
     audio_path = work_dir / "audio.mp3"
 
