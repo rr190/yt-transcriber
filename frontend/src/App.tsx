@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import UrlInput from "./components/UrlInput";
 import Progress from "./components/Progress";
@@ -21,6 +21,23 @@ function App() {
 
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+
+  // Long silent stretches (yt-dlp downloading/solving JS challenges,
+  // a cold-started Render instance waking up) can otherwise look like
+  // the app has frozen. An elapsed-time counter makes it visible that
+  // work is still happening even before we have real progress data.
+  useEffect(() => {
+    if (!loading) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setElapsed((previous) => previous + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [loading]);
 
   const appendChunk = (text: string) => {
     if (!text) {
@@ -70,6 +87,7 @@ function App() {
     setStatus("Starting...");
     setCurrentTime(0);
     setTotalDuration(0);
+    setElapsed(0);
 
     try {
       await streamTranscription(
@@ -128,6 +146,8 @@ function App() {
             status={status}
             currentTime={currentTime}
             totalDuration={totalDuration}
+            loading={loading}
+            elapsed={elapsed}
           />
         )}
 

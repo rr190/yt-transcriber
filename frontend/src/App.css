@@ -86,6 +86,20 @@ h1 {
   transition: width 0.3s ease;
 }
 
+.progress-bar-indeterminate {
+  width: 40%;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
 .status {
   margin: 20px 0;
   color: #555;
