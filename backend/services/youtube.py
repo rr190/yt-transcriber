@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -58,9 +59,15 @@ def download_audio(url: str) -> Path:
     # Set COOKIES_FILE (Render: add a secret file + env var pointing at
     # it) to a cookies.txt exported from a logged-in browser session to
     # work around this. Transparent to end users — no upload needed.
+    #
+    # Render secret files are mounted read-only, but yt-dlp rewrites the
+    # cookie jar in place after each run (cookies get rotated during use)
+    # — so copy it into our writable per-request work_dir first.
     cookies_file = os.environ.get("COOKIES_FILE")
     if cookies_file and Path(cookies_file).is_file():
-        command += ["--cookies", cookies_file]
+        writable_cookies = work_dir / "cookies.txt"
+        shutil.copyfile(cookies_file, writable_cookies)
+        command += ["--cookies", str(writable_cookies)]
 
     command.append(url)
 
