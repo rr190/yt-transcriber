@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+from pathlib import Path
 from threading import Event
 
 from dotenv import load_dotenv
@@ -8,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from backend.services.transcription import transcribe_concurrently
 from backend.services.youtube import download_audio, get_audio_duration
