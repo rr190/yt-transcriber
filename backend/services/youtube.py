@@ -141,3 +141,84 @@ def download_audio(url: str) -> Path:
     print(f"[youtube] audio file: {audio_path.name} ({audio_path.stat().st_size / 1_048_576:.1f} MiB)", flush=True)
 
     return audio_path
+
+
+def download_video_lowres(url: str, max_height: int = 480) -> Path:
+    """
+    Downloads a capped-resolution video stream (default <=480p, video-only
+    where YouTube offers it) into its own temporary directory, for use by
+    the subtitle-OCR pipeline. Kept entirely separate from download_audio()
+    so the existing Whisper path is untouched and either download can fail
+    independently.
+
+    Capped at max_height because we only need enough resolution to read
+    burned-in subtitle text after cropping to the subtitle band, not full
+    source quality — this keeps bandwidth/time and downstream ffmpeg/OCR
+    cost down.
+    """
+
+    work_dir = Path(tempfile.mkdtemp(prefix="ytt_video_"))
+    output_template = work_dir / "video.%(ext)s"
+
+    command = [
+        sys.executable,
+        "-m",
+        "yt_dlp",
+        "-f",
+        f"bestvideo[height<={max_height}]/best[height<={max_height}]",
+        "-o",
+        str(output_template),
+    ]
+
+    cookies_file = os.environ.get("COOKIES_FILE")
+    if cookies_file and Path(cookies_file).is_file():
+        writable_cookies = work_dir / "cookies.txt"
+        shutil.copyfile(cookies_file, writable_cookies)
+        command += ["--cookies", str(writable_cookies)]
+
+    command.append(url)
+
+    print(f"[youtube] starting yt-dlp (video, <={max_height}p) for {url}", flush=True)
+    start = time.monotonic()
+    output_lines: list[str] = []
+
+    try:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        assert process.stdout is not None
+        for line in process.stdout:
+            line = line.rstrip("\n")
+            print(f"[yt-dlp-video] {line}", flush=True)
+            output_lines.append(line)
+
+        returncode = process.wait()
+    except Exception as e:
+        raise RuntimeError(f"An unexpected error occurred: {e}")
+
+    elapsed = time.monotonic() - start
+    print(f"[youtube] yt-dlp (video) exited {returncode} after {elapsed:.1f}s", flush=True)
+
+    if returncode != 0:
+        tail = "\n".join(output_lines[-20:])
+        raise ValueError(
+            f"Failed to download video from the provided URL. {tail[-500:]}"
+        )
+
+    produced = [
+        p for p in work_dir.glob("video.*") if p.name != "cookies.txt"
+    ]
+
+    if not produced:
+        raise ValueError("Download succeeded but no video file was produced.")
+
+    video_path = produced[0]
+    print(f"[youtube] video file: {video_path.name} ({video_path.stat().st_size / 1_048_576:.1f} MiB)", flush=True)
+
+    return video_path

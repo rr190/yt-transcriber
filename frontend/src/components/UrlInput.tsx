@@ -3,6 +3,8 @@ interface UrlInputProps {
   setUrl: (url: string) => void;
   language: string;
   setLanguage: (language: string) => void;
+  enableOcr: boolean;
+  setEnableOcr: (enableOcr: boolean) => void;
   onSubmit: () => void;
   onStop: () => void;
   loading: boolean;
@@ -13,6 +15,8 @@ export default function UrlInput({
   setUrl,
   language,
   setLanguage,
+  enableOcr,
+  setEnableOcr,
   onSubmit,
   onStop,
   loading,
@@ -36,6 +40,16 @@ export default function UrlInput({
         <option value="zh">中文 (Chinese)</option>
         <option value="auto">Auto-detect</option>
       </select>
+
+      <label className="ocr-toggle">
+        <input
+          type="checkbox"
+          checked={enableOcr}
+          onChange={(e) => setEnableOcr(e.target.checked)}
+          disabled={loading}
+        />
+        Scan for burned-in subtitles (Traditional Chinese)
+      </label>
 
       <button
         onClick={loading ? onStop : onSubmit}

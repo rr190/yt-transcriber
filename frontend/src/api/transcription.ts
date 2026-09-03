@@ -6,9 +6,14 @@ export async function streamTranscription(
   url: string,
   language: string,
   onEvent: (event: TranscriptionEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  enableOcr: boolean = true
 ) {
-  const params = new URLSearchParams({ url, language });
+  const params = new URLSearchParams({
+    url,
+    language,
+    enable_ocr: String(enableOcr),
+  });
 
   const response = await fetch(`${API_URL}/transcribe?${params.toString()}`, {
     method: "POST",
@@ -52,6 +57,17 @@ export async function streamTranscription(
       const event = JSON.parse(line) as TranscriptionEvent;
 
       onEvent(event);
+
+      // A single network read can contain several NDJSON lines already
+      // buffered together (common on a fast/warm backend) - without this,
+      // React 18 batches every onEvent() call in this loop into one paint,
+      // so a segment's pending -> resolved transition (or a live frame
+      // update) could be applied and immediately overwritten before the
+      // browser ever draws the intermediate state. Yielding a macrotask
+      // between events guarantees each one gets its own paint, so the
+      // live progress is actually visible rather than just logically
+      // "correct but instantaneous."
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
 }

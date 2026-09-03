@@ -3,3 +3,7 @@ uvicorn[standard]
 yt-dlp[default]
 groq
 python-dotenv
+easyocr
+pillow
+numpy
+opencv-python-headless
